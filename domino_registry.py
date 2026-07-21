@@ -133,6 +133,19 @@ class DominoModelRegistry:
 
         return entry
 
+    def _set_experiment_safe(self, name):
+        """Set MLflow experiment, restoring it if it was previously deleted."""
+        try:
+            mlflow.set_experiment(name)
+        except Exception:
+            client = MlflowClient()
+            exp = client.get_experiment_by_name(name)
+            if exp and exp.lifecycle_stage == 'deleted':
+                client.restore_experiment(exp.experiment_id)
+                mlflow.set_experiment(name)
+            else:
+                raise
+
     def _register_with_mlflow(self, model_name: str, model_path: str,
                                metadata: dict, entry: dict):
         """Register model with MLflow so it appears in Domino's Models tab.
@@ -148,7 +161,7 @@ class DominoModelRegistry:
             with open(model_path, 'rb') as f:
                 model_obj = pickle.load(f)
 
-            mlflow.set_experiment(f"migration-{model_name}")
+            self._set_experiment_safe(f"migration-{model_name}")
 
             version_history = metadata.get('version_history', [])
             stage_map = {

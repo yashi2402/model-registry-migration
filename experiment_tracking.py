@@ -42,11 +42,25 @@ class ExperimentTracker:
         try:
             if MLFLOW_TRACKING_URI:
                 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-            mlflow.set_experiment(self.experiment_name)
+            self._set_experiment_safe(self.experiment_name)
             self.mlflow_enabled = True
             print(f"    [INFO] MLflow tracking enabled - experiments will appear in Domino Experiments tab")
         except Exception as e:
             print(f"    [INFO] MLflow setup skipped ({e}) - using local tracking")
+
+    def _set_experiment_safe(self, name):
+        """Set MLflow experiment, restoring it if it was previously deleted."""
+        try:
+            mlflow.set_experiment(name)
+        except Exception:
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient()
+            exp = client.get_experiment_by_name(name)
+            if exp and exp.lifecycle_stage == 'deleted':
+                client.restore_experiment(exp.experiment_id)
+                mlflow.set_experiment(name)
+            else:
+                raise
 
     def run_experiment(self, run_name: str, model, X_train, y_train,
                        X_test, y_test, params: dict, tags: dict = None) -> dict:
