@@ -29,11 +29,11 @@ class ModelPromotionManager:
                 'min_f1': 0.80,
                 'min_roc_auc': 0.85,
                 'requires_approval': True,
-                'approvers': ['team_lead', 'ml_engineer'],
+                'approvers': ['yashi_rahangdale@epam.com'],
             },
             'production_to_archived': {
                 'requires_approval': True,
-                'approvers': ['team_lead'],
+                'approvers': ['yashi_rahangdale@epam.com'],
             },
         }
 
@@ -174,7 +174,7 @@ def run_promotion_workflow():
     result = manager.promote(
         'customer-churn-model', 3, 'production',
         reason='Passed A/B testing with 12% improvement over baseline',
-        approved_by='team_lead'
+        approved_by='yashi_rahangdale@epam.com'
     )
     for check in result['validation'].get('checks', []):
         status = "PASS" if check['passed'] else "FAIL"
