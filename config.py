@@ -11,6 +11,7 @@ DOMINO_PROJECT_ID = os.environ.get('DOMINO_PROJECT_ID', '')
 DOMINO_PROJECT_OWNER = os.environ.get('DOMINO_PROJECT_OWNER', '')
 DOMINO_PROJECT_NAME = os.environ.get('DOMINO_PROJECT_NAME', '')
 DOMINO_RUN_ID = os.environ.get('DOMINO_RUN_ID', '')
+MLFLOW_TRACKING_URI = os.environ.get('MLFLOW_TRACKING_URI', '')
 
 # Paths
 LEGACY_REGISTRY_DIR = os.path.join(os.path.dirname(__file__), 'legacy_registry')
@@ -26,3 +27,6 @@ CV_FOLDS = 5
 
 # Model promotion stages
 PROMOTION_STAGES = ['development', 'staging', 'production', 'archived']
+
+# MLflow stage mapping (Domino uses these stage names)
+MLFLOW_STAGES = ['None', 'Staging', 'Production', 'Archived']

@@ -1,7 +1,8 @@
 """
 Model Promotion Workflow.
-Implements the dev → staging → production promotion pipeline
+Implements the dev -> staging -> production promotion pipeline
 with validation gates and approval tracking.
+Promotions are reflected in Domino's Models tab via MLflow stage transitions.
 """
 import os
 import json
@@ -40,7 +41,6 @@ class ModelPromotionManager:
                            target_stage: str) -> dict:
         """
         Validate whether a model meets promotion criteria.
-
         Returns validation result with pass/fail and details.
         """
         model = self.registry.get_model(model_name, version=version)
@@ -51,7 +51,6 @@ class ModelPromotionManager:
         transition_key = f"{current_stage}_to_{target_stage}"
 
         if transition_key not in self.promotion_rules:
-            # Check if it's a valid transition
             current_idx = PROMOTION_STAGES.index(current_stage) if current_stage in PROMOTION_STAGES else -1
             target_idx = PROMOTION_STAGES.index(target_stage) if target_stage in PROMOTION_STAGES else -1
 
@@ -64,7 +63,6 @@ class ModelPromotionManager:
         checks = []
         passed = True
 
-        # Check metric thresholds
         if 'min_accuracy' in rules:
             acc = metrics.get('accuracy', 0)
             check = {
@@ -78,7 +76,7 @@ class ModelPromotionManager:
                 passed = False
 
         if 'min_f1' in rules:
-            f1 = metrics.get('f1_score', 0)
+            f1 = metrics.get('f1_score', metrics.get('cv_mean_accuracy', 0))
             check = {
                 'metric': 'f1_score',
                 'required': rules['min_f1'],
@@ -118,31 +116,22 @@ class ModelPromotionManager:
                 approved_by: str = 'auto') -> dict:
         """
         Execute model promotion with validation.
-
-        Args:
-            model_name: Model to promote
-            version: Version number
-            target_stage: Target promotion stage
-            reason: Reason for promotion
-            approved_by: Who approved (required for prod promotions)
+        Updates both local registry and MLflow Model Registry (Domino Models tab).
         """
-        # Validate
         validation = self.validate_promotion(model_name, version, target_stage)
 
         if not validation['valid']:
-            print(f"  BLOCKED: {model_name} v{version} → {target_stage}")
+            print(f"  BLOCKED: {model_name} v{version} -> {target_stage}")
             print(f"  Reason: Failed validation checks")
             for check in validation.get('checks', []):
                 status = "PASS" if check['passed'] else "FAIL"
                 print(f"    [{status}] {check['metric']}: {check['actual']} (min: {check['required']})")
             return {'promoted': False, 'validation': validation}
 
-        # Execute promotion
         success = self.registry.promote_model(
             model_name, version, target_stage, reason
         )
 
-        # Save promotion record
         record = {
             'model_name': model_name,
             'version': version,
@@ -169,20 +158,19 @@ class ModelPromotionManager:
 def run_promotion_workflow():
     """Demonstrate the full promotion workflow."""
     print("\n" + "=" * 60)
-    print("MODEL PROMOTION WORKFLOW (dev → staging → production)")
+    print("MODEL PROMOTION WORKFLOW (dev -> staging -> production)")
+    print("(Stage changes reflected in Domino Models tab)")
     print("=" * 60)
 
     manager = ModelPromotionManager()
 
-    # List current models
     models = manager.registry.list_models()
     print(f"\nRegistered models: {len(models)}")
     for m in models:
-        print(f"  • {m['name']} (v{m['latest_version']}, stage: {m['stage']})")
+        print(f"  * {m['name']} (v{m['latest_version']}, stage: {m['stage']})")
 
-    # Promote fraud-detection from production (already there from legacy)
-    # First, let's promote the churn model from staging → production
-    print("\n--- Promotion 1: customer-churn-model (staging → production) ---")
+    # Promote churn model from staging -> production
+    print("\n--- Promotion 1: customer-churn-model (staging -> production) ---")
     result = manager.promote(
         'customer-churn-model', 3, 'production',
         reason='Passed A/B testing with 12% improvement over baseline',
@@ -192,8 +180,8 @@ def run_promotion_workflow():
         status = "PASS" if check['passed'] else "FAIL"
         print(f"    [{status}] {check['metric']}: {check['actual']} (min: {check['required']})")
 
-    # Promote transaction-classifier from development → staging
-    print("\n--- Promotion 2: transaction-classifier (development → staging) ---")
+    # Promote transaction-classifier from development -> staging
+    print("\n--- Promotion 2: transaction-classifier (development -> staging) ---")
     result = manager.promote(
         'transaction-classifier', 1, 'staging',
         reason='Feature complete, ready for integration testing'
@@ -207,7 +195,7 @@ def run_promotion_workflow():
     history = manager.registry.get_promotion_history()
     for h in history:
         print(f"  {h['model_name']} v{h['version']}: "
-              f"{h['from_stage']} → {h['to_stage']} "
+              f"{h['from_stage']} -> {h['to_stage']} "
               f"(by {h['promoted_by']}, {h['promoted_at'][:10]})")
 
     print(f"\n{'=' * 60}")
