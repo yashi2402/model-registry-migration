@@ -6,11 +6,35 @@ Promotions are reflected in Domino's Models tab via MLflow stage transitions.
 """
 import os
 import json
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 from typing import Optional
 
 from config import REGISTRY_PATH, PROMOTION_STAGES
 from domino_registry import DominoModelRegistry
+
+APPROVER_EMAIL = 'yashi_rahangdale@epam.com'
+
+
+def send_notification_email(subject: str, body: str, to_email: str = APPROVER_EMAIL):
+    """Send email notification about promotion decision."""
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = 'model-registry@domino.tech'
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Try to send via localhost SMTP (works in many enterprise environments)
+        with smtplib.SMTP('localhost', 25, timeout=5) as server:
+            server.sendmail(msg['From'], to_email, msg.as_string())
+        print(f"  [EMAIL] Notification sent to {to_email}")
+    except Exception as e:
+        print(f"  [EMAIL] Notification skipped (SMTP not configured: {type(e).__name__})")
+        print(f"  [EMAIL] Would have sent to: {to_email}")
+        print(f"  [EMAIL] Subject: {subject}")
 
 
 class ModelPromotionManager:
@@ -115,7 +139,8 @@ class ModelPromotionManager:
                 target_stage: str, reason: str = '',
                 approved_by: str = 'auto') -> dict:
         """
-        Execute model promotion with validation.
+        Execute model promotion with validation and approval.
+        If approval is required, asks the approver interactively.
         Updates both local registry and MLflow Model Registry (Domino Models tab).
         """
         validation = self.validate_promotion(model_name, version, target_stage)
@@ -127,6 +152,64 @@ class ModelPromotionManager:
                 status = "PASS" if check['passed'] else "FAIL"
                 print(f"    [{status}] {check['metric']}: {check['actual']} (min: {check['required']})")
             return {'promoted': False, 'validation': validation}
+
+        # If approval is required, ask for it
+        if validation.get('requires_approval', False):
+            approvers = validation.get('approvers', [])
+            print(f"  APPROVAL REQUIRED from: {', '.join(approvers)}")
+            print(f"  Model: {model_name} v{version}")
+            print(f"  Transition: {validation['from_stage']} -> {target_stage}")
+            print(f"  Reason: {reason}")
+            for check in validation.get('checks', []):
+                status = "PASS" if check['passed'] else "FAIL"
+                print(f"    [{status}] {check['metric']}: {check['actual']} (min: {check['required']})")
+
+            approval = input(f"\n  [{approvers[0]}] Do you approve this promotion? (yes/no): ").strip().lower()
+
+            if approval not in ('yes', 'y'):
+                print(f"  REJECTED: Promotion denied by approver")
+                send_notification_email(
+                    subject=f"[REJECTED] Model Promotion: {model_name} v{version} -> {target_stage}",
+                    body=f"Model promotion was REJECTED.\n\n"
+                         f"Model: {model_name}\n"
+                         f"Version: {version}\n"
+                         f"Requested transition: {validation['from_stage']} -> {target_stage}\n"
+                         f"Reason: {reason}\n"
+                         f"Rejected by: {approvers[0]}\n"
+                         f"Time: {datetime.now().isoformat()}\n"
+                )
+                record = {
+                    'model_name': model_name,
+                    'version': version,
+                    'target_stage': target_stage,
+                    'validation': validation,
+                    'promoted': False,
+                    'reason': reason,
+                    'rejected_by': approvers[0],
+                    'timestamp': datetime.now().isoformat(),
+                }
+                records_dir = os.path.join(REGISTRY_PATH, 'promotion_records')
+                os.makedirs(records_dir, exist_ok=True)
+                record_file = os.path.join(
+                    records_dir,
+                    f"{model_name}_v{version}_{target_stage}_REJECTED_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                )
+                with open(record_file, 'w') as f:
+                    json.dump(record, f, indent=2)
+                return {'promoted': False, 'validation': validation, 'rejected_by': approvers[0]}
+
+            approved_by = approvers[0]
+            print(f"  APPROVED by: {approved_by}")
+            send_notification_email(
+                subject=f"[APPROVED] Model Promotion: {model_name} v{version} -> {target_stage}",
+                body=f"Model promotion was APPROVED.\n\n"
+                     f"Model: {model_name}\n"
+                     f"Version: {version}\n"
+                     f"Transition: {validation['from_stage']} -> {target_stage}\n"
+                     f"Reason: {reason}\n"
+                     f"Approved by: {approved_by}\n"
+                     f"Time: {datetime.now().isoformat()}\n"
+            )
 
         success = self.registry.promote_model(
             model_name, version, target_stage, reason
