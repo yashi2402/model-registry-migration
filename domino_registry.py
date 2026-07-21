@@ -135,75 +135,81 @@ class DominoModelRegistry:
 
     def _register_with_mlflow(self, model_name: str, model_path: str,
                                metadata: dict, entry: dict):
-        """Register model with MLflow so it appears in Domino's Models tab."""
+        """Register model with MLflow so it appears in Domino's Models tab.
+        Registers ALL versions from version_history so multiple versions show up."""
         if not self.mlflow_enabled:
             return
 
         try:
-            # Load the sklearn model from pickle
-            if os.path.exists(model_path):
-                with open(model_path, 'rb') as f:
-                    model_obj = pickle.load(f)
-            else:
+            if not os.path.exists(model_path):
                 print(f"    [WARN] Model file not found: {model_path}")
                 return
 
-            # Log the model with MLflow and register it
+            with open(model_path, 'rb') as f:
+                model_obj = pickle.load(f)
+
             mlflow.set_experiment(f"migration-{model_name}")
-            with mlflow.start_run(run_name=f"migrate-{model_name}-v{metadata.get('version', 1)}"):
-                # Log metadata as params
-                params_to_log = {}
-                for k, v in metadata.get('parameters', {}).items():
-                    params_to_log[k] = str(v)
-                params_to_log['model_type'] = metadata.get('model_type', '')
-                params_to_log['framework'] = metadata.get('framework', '')
-                params_to_log['migrated_from'] = 'GPS/Davnic MLflow'
-                mlflow.log_params(params_to_log)
 
-                # Log metrics
-                for k, v in metadata.get('metrics', {}).items():
-                    if isinstance(v, (int, float)):
-                        mlflow.log_metric(k, v)
-
-                # Set tags
-                mlflow.set_tag('use_case', metadata.get('use_case', ''))
-                mlflow.set_tag('created_by', metadata.get('created_by', ''))
-                mlflow.set_tag('migration_source', 'GPS/Davnic')
-                mlflow.set_tag('original_stage', metadata.get('stage', ''))
-
-                # Log and register the model (this makes it appear in Models tab!)
-                mlflow.sklearn.log_model(
-                    model_obj,
-                    "model",
-                    registered_model_name=model_name
-                )
-
-                run_id = mlflow.active_run().info.run_id
-                entry['mlflow_run_id'] = run_id
-
-            # Transition to appropriate stage
+            version_history = metadata.get('version_history', [])
             stage_map = {
                 'production': 'Production',
                 'staging': 'Staging',
                 'archived': 'Archived',
                 'development': 'None',
             }
-            target_stage = stage_map.get(metadata.get('stage', ''), 'None')
-            if target_stage != 'None':
+
+            if not version_history:
+                version_history = [{'version': metadata.get('version', 1), 'stage': metadata.get('stage', 'development')}]
+
+            for vh in version_history:
+                v_num = vh.get('version', 1)
+                v_stage = vh.get('stage', 'development')
+
+                with mlflow.start_run(run_name=f"migrate-{model_name}-v{v_num}"):
+                    params_to_log = {}
+                    for k, v in metadata.get('parameters', {}).items():
+                        params_to_log[k] = str(v)
+                    params_to_log['model_type'] = metadata.get('model_type', '')
+                    params_to_log['framework'] = metadata.get('framework', '')
+                    params_to_log['migrated_from'] = 'GPS/Davnic MLflow'
+                    params_to_log['version'] = str(v_num)
+                    mlflow.log_params(params_to_log)
+
+                    if 'accuracy' in vh:
+                        mlflow.log_metric('accuracy', vh['accuracy'])
+                    for k, v in metadata.get('metrics', {}).items():
+                        if isinstance(v, (int, float)) and k != 'accuracy':
+                            mlflow.log_metric(k, v)
+
+                    mlflow.set_tag('use_case', metadata.get('use_case', ''))
+                    mlflow.set_tag('created_by', metadata.get('created_by', ''))
+                    mlflow.set_tag('migration_source', 'GPS/Davnic')
+                    mlflow.set_tag('version_stage', v_stage)
+                    mlflow.set_tag('version_number', str(v_num))
+
+                    mlflow.sklearn.log_model(
+                        model_obj,
+                        "model",
+                        registered_model_name=model_name
+                    )
+
+                mlflow_stage = stage_map.get(v_stage, 'None')
                 try:
-                    model_versions = self.mlflow_client.get_latest_versions(model_name)
-                    if model_versions:
-                        latest_mv = model_versions[-1]
-                        self.mlflow_client.transition_model_version_stage(
-                            name=model_name,
-                            version=latest_mv.version,
-                            stage=target_stage
-                        )
-                        print(f"    [MLflow] Registered & set stage to '{target_stage}' (visible in Models tab)")
-                except Exception as e:
-                    print(f"    [MLflow] Registered (stage transition skipped: {e})")
-            else:
-                print(f"    [MLflow] Registered in Model Registry (visible in Models tab)")
+                    all_versions = self.mlflow_client.search_model_versions(f"name='{model_name}'")
+                    if all_versions:
+                        latest_mv = max(all_versions, key=lambda x: int(x.version))
+                        if mlflow_stage != 'None':
+                            self.mlflow_client.transition_model_version_stage(
+                                name=model_name,
+                                version=latest_mv.version,
+                                stage=mlflow_stage
+                            )
+                except Exception:
+                    pass
+
+                print(f"    [MLflow] Registered v{v_num} (stage: {v_stage})")
+
+            print(f"    [MLflow] Total {len(version_history)} versions in Models tab")
 
         except Exception as e:
             print(f"    [MLflow] Registration skipped: {e}")
