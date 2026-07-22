@@ -136,7 +136,8 @@ class DominoModelRegistry:
         self.registry['models'][model_name]['current_stage'] = entry['stage']
         self._save_registry()
 
-        print(f"  Registered: {model_name} (versions: {', '.join(f'v{vh[\"version\"]}' for vh in version_history)})")
+        version_list = ', '.join(f'v{vh["version"]}' for vh in version_history)
+        print(f"  Registered: {model_name} (versions: {version_list})")
         print(f"  Stored at:  {os.path.join(REGISTRY_PATH, model_name)}")
 
         # Register in MLflow Model Registry (appears in Domino Models tab)
