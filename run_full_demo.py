@@ -26,6 +26,21 @@ def run_full_demo():
     print(f"  Domino Registry: {REGISTRY_PATH}")
     print(f"  Experiments:     {EXPERIMENTS_DIR}")
 
+    # Cleanup old MLflow models for fresh demo run
+    print("\n[Cleanup] Removing old models from MLflow...")
+    try:
+        from domino_registry import DominoModelRegistry
+        registry_temp = DominoModelRegistry()
+        if registry_temp.mlflow_enabled:
+            for model_name in ['fraud-detection-model', 'customer-churn-model', 'transaction-classifier']:
+                try:
+                    registry_temp.mlflow_client.delete_registered_model(model_name)
+                    print(f"  Deleted MLflow model: {model_name}")
+                except:
+                    pass
+    except Exception as e:
+        print(f"  Cleanup skipped: {e}")
+
     # Step 1: Export from legacy registry
     print("\n\n" + "=" * 60)
     print("STEP 1: Export Models from Legacy Registry")
