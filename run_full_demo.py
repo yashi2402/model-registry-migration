@@ -26,16 +26,26 @@ def run_full_demo():
     print(f"  Domino Registry: {REGISTRY_PATH}")
     print(f"  Experiments:     {EXPERIMENTS_DIR}")
 
-    # Cleanup old MLflow models for fresh demo run
-    print("\n[Cleanup] Removing old models from MLflow...")
+    # Cleanup old MLflow models and experiments for fresh demo run
+    print("\n[Cleanup] Removing old models and experiments from MLflow...")
     try:
-        from domino_registry import DominoModelRegistry
-        registry_temp = DominoModelRegistry()
-        if registry_temp.mlflow_enabled:
-            for model_name in ['fraud-detection-model', 'customer-churn-model', 'transaction-classifier']:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+        mlflow_uri = os.environ.get('MLFLOW_TRACKING_URI', '')
+        if mlflow_uri:
+            mlflow.set_tracking_uri(mlflow_uri)
+        client = MlflowClient()
+        for model_name in ['fraud-detection-model', 'customer-churn-model', 'transaction-classifier']:
+            try:
+                client.delete_registered_model(model_name)
+                print(f"  Deleted model: {model_name}")
+            except:
+                pass
+        for exp in client.search_experiments():
+            if exp.name != 'Default' and exp.experiment_id != '0':
                 try:
-                    registry_temp.mlflow_client.delete_registered_model(model_name)
-                    print(f"  Deleted MLflow model: {model_name}")
+                    client.delete_experiment(exp.experiment_id)
+                    print(f"  Deleted experiment: {exp.name}")
                 except:
                     pass
     except Exception as e:

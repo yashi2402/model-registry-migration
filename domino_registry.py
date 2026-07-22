@@ -110,23 +110,34 @@ class DominoModelRegistry:
         # Store in local registry
         if model_name not in self.registry['models']:
             self.registry['models'][model_name] = {'versions': {}}
-        self.registry['models'][model_name]['versions'][str(version)] = entry
+
+        # Store ALL versions from version_history locally (Data tab)
+        version_history = metadata.get('version_history', [])
+        if not version_history:
+            version_history = [{'version': version, 'stage': entry['stage']}]
+
+        for vh in version_history:
+            v_num = vh.get('version', version)
+            v_stage = vh.get('stage', 'development')
+            v_entry = dict(entry)
+            v_entry['version'] = v_num
+            v_entry['stage'] = v_stage
+            self.registry['models'][model_name]['versions'][str(v_num)] = v_entry
+
+            # Save each version folder in Data tab
+            v_store = os.path.join(REGISTRY_PATH, model_name, f'v{v_num}')
+            os.makedirs(v_store, exist_ok=True)
+            if os.path.exists(model_path):
+                shutil.copy2(model_path, os.path.join(v_store, 'model.pkl'))
+            with open(os.path.join(v_store, 'metadata.json'), 'w') as f:
+                json.dump(v_entry, f, indent=2)
+
         self.registry['models'][model_name]['latest_version'] = version
         self.registry['models'][model_name]['current_stage'] = entry['stage']
-
-        # Copy model artifact to local registry storage
-        model_store = os.path.join(REGISTRY_PATH, model_name, f'v{version}')
-        os.makedirs(model_store, exist_ok=True)
-        if os.path.exists(model_path):
-            shutil.copy2(model_path, os.path.join(model_store, 'model.pkl'))
-
-        with open(os.path.join(model_store, 'metadata.json'), 'w') as f:
-            json.dump(entry, f, indent=2)
-
         self._save_registry()
 
-        print(f"  Registered: {model_name} v{version} [{entry['stage']}]")
-        print(f"  Stored at:  {model_store}")
+        print(f"  Registered: {model_name} (versions: {', '.join(f'v{vh[\"version\"]}' for vh in version_history)})")
+        print(f"  Stored at:  {os.path.join(REGISTRY_PATH, model_name)}")
 
         # Register in MLflow Model Registry (appears in Domino Models tab)
         self._register_with_mlflow(model_name, model_path, metadata, entry)
